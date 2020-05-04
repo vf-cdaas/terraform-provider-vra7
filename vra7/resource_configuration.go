@@ -24,7 +24,7 @@ func resourceConfigurationSchema() *schema.Schema {
 					Optional: true,
 					Computed: true,
 					DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
-						if old != "" && new == "" {
+						if (old != "" && new == "") || (old == "" && new == "") {
 							return true
 						}
 						return false
@@ -125,9 +125,10 @@ func instancesSchema() *schema.Schema {
 	}
 }
 
-func expandResourceConfiguration(rConfigurations []interface{}) []sdk.ResourceConfigurationStruct {
-	configs := make([]sdk.ResourceConfigurationStruct, 0, len(rConfigurations))
-	for _, config := range rConfigurations {
+func expandResourceConfiguration(rConfigurations interface{}) []sdk.ResourceConfigurationStruct {
+	configs := make([]sdk.ResourceConfigurationStruct, 0, len(rConfigurations.([]interface{})))
+
+	for _, config := range rConfigurations.([]interface{}) {
 		configMap := config.(map[string]interface{})
 		instances := make([]sdk.Instance, 0)
 		for _, i := range configMap["instances"].([]interface{}) {
