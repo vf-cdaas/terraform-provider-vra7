@@ -430,68 +430,114 @@ func resourceVra7DeploymentRead(d *schema.ResourceData, meta interface{}) error 
 	// parse the resource view API response and create a resource configuration list that will contain information
 	// of the deployed VMs
 	var resourceConfigList []sdk.ResourceConfigurationStruct
+	for _, resource := range requestResourceView.Content {
+		rMap := resource.(map[string]interface{})
+		resourceType := rMap["resourceType"].(string)
+		name := rMap["name"].(string)
+		dateCreated := rMap["dateCreated"].(string)
+		lastUpdated := rMap["lastUpdated"].(string)
+		resourceID := rMap["resourceId"].(string)
+		requestID := rMap["requestId"].(string)
+		requestState := rMap["requestState"].(string)
+		hasChildren := rMap["hasChildren"].(bool)
 
-	deployment, err := vraClient.GetDeployment(deploymentID)
+		// only read the Deployment from the first content response,
+		// get VMs and other components as Child Resources from the Deployment
+		if resourceType == sdk.DeploymentResourceType {
 
-	if err != nil {
-		return err
-	}
+			leaseMap := rMap["lease"].(map[string]interface{})
+			leaseStart := leaseMap["start"].(string)
+			d.Set("lease_start", leaseStart)
+			// if the lease never expires, the end date will be null
+			if leaseMap["end"] != nil {
+				leaseEnd := leaseMap["end"].(string)
+				d.Set("lease_end", leaseEnd)
+				// the lease_days are calculated from the current time and lease_end dates as the resourceViews API does not return that information
+				currTime, _ := time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
+				endTime, _ := time.Parse(time.RFC3339, leaseEnd)
+				diff := endTime.Sub(currTime)
+				d.Set("lease_days", int(diff.Hours()/24))
+				// end
+			} else {
+				d.Set("lease_days", nil) // set lease days to nil if lease_end is nil
+			}
 
-	d.Set("catalog_item_id", deployment.CatalogItem.ID)
-	d.Set("catalog_item_name", deployment.CatalogItem.Label)
-	d.Set("deployment_id", deploymentID)
-	d.Set("description", deployment.Description)
-	d.Set("created_date", deployment.CreatedDate)
-	d.Set("expiry_date", deployment.ExpiryDate)
-	d.Set("name", deployment.Name)
-	d.Set("businessgroup_id", deployment.Subtenant.ID)
-	d.Set("businessgroup_name", deployment.Subtenant.Label)
+			d.Set("catalog_item_id", rMap["catalogItemId"].(string))
+			d.Set("catalog_item_name", rMap["catalogItemLabel"].(string))
+			d.Set("deployment_id", resourceID)
+			d.Set("date_created", dateCreated)
+			d.Set("last_updated", lastUpdated)
+			d.Set("tenant_id", rMap["tenantId"].(string))
+			d.Set("owners", rMap["owners"].([]interface{}))
+			d.Set("name", name)
+			d.Set("businessgroup_id", rMap["businessGroupId"].(string))
 
-	owners := make([]map[string]string, 0)
-	for _, owner := range deployment.Owners {
-		ownerMap := make(map[string]string)
-		ownerMap["id"] = owner.ID
-		ownerMap["name"] = owner.Name
-		owners = append(owners, ownerMap)
-	}
-	d.Set("owners", owners)
+			if hasChildren {
+				links := rMap["links"].([]interface{})
+				var childResourcesLink string
 
-	for _, component := range deployment.Components {
-
-		if component.Type == sdk.InfrastructureVirtual {
-
-			data := component.Data
-			componentName := data["Component"].(string)
-
-			if componentName != "" {
-				instance := sdk.Instance{}
-				instance.IPAddress = data["ip_address"].(string)
-				instance.Name = component.Name
-				instance.ResourceID = component.ID
-				instance.ResourceType = component.Type
-				instance.Properties = data
-
-				// checking to see if a resource configuration struct exists for the component name
-				// if yes, then add another instance to the instances list of that resource config struct
-				// at index of resource config list
-				// else create a new rescource config struct and add to the resource config list
-				index, rcStruct := GetResourceConfigurationByComponent(resourceConfigList, componentName)
-
-				if index == -1 {
-					rcStruct.ComponentName = componentName
-					rcStruct.RequestID = catalogItemRequestID
-					rcStruct.ParentResourceID = component.ParentID
-					if p != nil && p.ResourceConfiguration != nil {
-						rcStruct.Configuration = GetConfiguration(componentName, p.ResourceConfiguration)
+				for _, link := range links {
+					l := link.(map[string]interface{})
+					if l["rel"].(string) == "GET: Child Resources" {
+						childResourcesLink = l["href"].(string)
 					}
-					rcStruct.Instances = make([]sdk.Instance, 0)
-					rcStruct.Instances = append(rcStruct.Instances, instance)
-					resourceConfigList = append(resourceConfigList, rcStruct)
-				} else {
-					rcStruct.Instances = append(rcStruct.Instances, instance)
-					resourceConfigList[index] = rcStruct
 				}
-				clusterCountMap[componentName] = clusterCountMap[componentName] + 1
+				requestResourceView, errTemplate := vraClient.GetChildResources(childResourcesLink)
+				if requestResourceView != nil && len(requestResourceView.Content) == 0 {
+					//If resource does not exists then unset the resource ID from state file
+					d.SetId("")
+					return fmt.Errorf("The resource cannot be found")
+				}
+				if errTemplate != nil || len(requestResourceView.Content) == 0 {
+					return fmt.Errorf("Resource view failed to load with the error %v", errTemplate)
+				}
+
+				for _, resource := range requestResourceView.Content {
+					rMap := resource.(map[string]interface{})
+					resourceType := rMap["resourceType"].(string)
+					name := rMap["name"].(string)
+					dateCreated := rMap["dateCreated"].(string)
+					lastUpdated := rMap["lastUpdated"].(string)
+					resourceID := rMap["resourceId"].(string)
+					// if the resource type is VMs, update the resource_configuration attribute
+					data := rMap["data"].(map[string]interface{})
+					// componentName := data["Component"].(string)
+					parentResourceID := rMap["parentResourceId"].(string)
+					var resourceConfigStruct sdk.ResourceConfigurationStruct
+					resourceConfigStruct.Configuration = data
+					// resourceConfigStruct.ComponentName = componentName
+					resourceConfigStruct.Name = name
+					resourceConfigStruct.DateCreated = dateCreated
+					resourceConfigStruct.LastUpdated = lastUpdated
+					resourceConfigStruct.ResourceID = resourceID
+					resourceConfigStruct.ResourceType = resourceType
+					resourceConfigStruct.RequestID = requestID
+					resourceConfigStruct.RequestState = requestState
+					resourceConfigStruct.ParentResourceID = parentResourceID
+					if resourceType == sdk.InfrastructureVirtual {
+						resourceConfigStruct.IPAddress = data["ip_address"].(string)
+					}
+
+					if rMap["description"] != nil {
+						resourceConfigStruct.Description = rMap["description"].(string)
+					}
+					if rMap["status"] != nil {
+						resourceConfigStruct.Status = rMap["status"].(string)
+					}
+					// the cluster value is calculated from the map based on the component name as the
+					// resourceViews API does not return that information
+					// clusterCountMap[componentName] = clusterCountMap[componentName] + 1
+
+					resourceConfigList = append(resourceConfigList, resourceConfigStruct)
+				}
+
+			}
+
+			if rMap["description"] != nil {
+				d.Set("description", rMap["description"].(string))
+			}
+			if rMap["status"] != nil {
+				d.Set("request_status", rMap["status"].(string))
 			}
 		}
 	}
