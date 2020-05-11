@@ -6,9 +6,9 @@ PKG_NAME=vra7
 default: build
 
 build: fmtcheck mkbindir
-	GOOS=darwin GOARCH=amd64 go build -o bin/darwin_amd64/terraform-provider-gfkvra7
-	GOOS=windows GOARCH=amd64 go build -o bin/windows_amd64/terraform-provider-gfkvra7
-	GOOS=linux GOARCH=amd64 go build -o bin/linux_amd64/terraform-provider-gfkvra7
+	GOOS=darwin GOARCH=amd64 go build -o bin/darwin_amd64/terraform-provider-vra7
+	GOOS=windows GOARCH=amd64 go build -o bin/windows_amd64/terraform-provider-vra7
+	GOOS=linux GOARCH=amd64 go build -o bin/linux_amd64/terraform-provider-vra7
 
 mkbindir:
 	mkdir -p bin/darwin_amd64
