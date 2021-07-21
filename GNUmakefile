@@ -5,8 +5,15 @@ PKG_NAME=vra7
 
 default: build
 
-build: fmtcheck
-	go install
+build: fmtcheck mkbindir
+	GOOS=darwin GOARCH=amd64 go build -o bin/darwin_amd64/terraform-provider-vra7
+	GOOS=windows GOARCH=amd64 go build -o bin/windows_amd64/terraform-provider-vra7
+	GOOS=linux GOARCH=amd64 go build -o bin/linux_amd64/terraform-provider-vra7
+
+mkbindir:
+	mkdir -p bin/darwin_amd64
+	mkdir -p bin/windows_amd64
+	mkdir -p bin/linux_amd64
 
 test: fmtcheck
 	go test -i $(TEST) || exit 1

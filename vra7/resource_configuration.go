@@ -6,13 +6,14 @@ import (
 
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/vmware/terraform-provider-vra7/sdk"
+	"github.com/vmware/terraform-provider-vra7/utils"
 )
 
 func resourceConfigurationSchema() *schema.Schema {
 	return &schema.Schema{
-		Type:     schema.TypeSet,
-		Optional: true,
-		Computed: true,
+		Type:     schema.TypeList,
+		Optional: !computed,
+		Computed: computed,
 		Elem: &schema.Resource{
 			Schema: map[string]*schema.Schema{
 				"component_name": {
@@ -23,6 +24,12 @@ func resourceConfigurationSchema() *schema.Schema {
 					Type:     schema.TypeMap,
 					Optional: true,
 					Computed: true,
+					DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+						if (old != "" && new == "") || (old == "" && new == "") {
+							return true
+						}
+						return false
+					},
 					Elem: &schema.Schema{
 						Type: schema.TypeString,
 					},
@@ -119,9 +126,10 @@ func instancesSchema() *schema.Schema {
 	}
 }
 
-func expandResourceConfiguration(rConfigurations []interface{}) []sdk.ResourceConfigurationStruct {
-	configs := make([]sdk.ResourceConfigurationStruct, 0, len(rConfigurations))
-	for _, config := range rConfigurations {
+func expandResourceConfiguration(rConfigurations interface{}) []sdk.ResourceConfigurationStruct {
+	configs := make([]sdk.ResourceConfigurationStruct, 0, len(rConfigurations.([]interface{})))
+
+	for _, config := range rConfigurations.([]interface{}) {
 		configMap := config.(map[string]interface{})
 		instances := make([]sdk.Instance, 0)
 		for _, i := range configMap["instances"].([]interface{}) {
